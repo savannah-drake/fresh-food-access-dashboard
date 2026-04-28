@@ -2,9 +2,6 @@ streamlit
 pandas
 numpy
 plotly
-geopandas
-shapely
-fiona
-pyproj
-rtree
+geopandas==0.13.2
 pyogrio
+shapely

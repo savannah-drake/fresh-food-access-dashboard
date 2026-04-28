@@ -91,9 +91,9 @@ st.title("Fresh Food Access Dashboard")
 st.caption("Neighborhood-level decision support for identifying communities facing elevated barriers to fresh food access in Atlanta.")
 
 DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "processed" / "tract_level_food_access.geojson"
+st.write("Reading data from:", DATA_PATH)
 
-
-@st.cache_data
+#@st.cache_data
 def load_data(path: Path):
     gdf = gpd.read_file(path)
 
@@ -105,6 +105,14 @@ def load_data(path: Path):
         "food_business_count",
         "marta_access_count",
         "has_lila",
+        "total_snap_stores",
+        "high_access_count",
+        "moderate_access_count",
+        "specialty_access_count",
+        "low_access_count",
+        "other_snap_count",
+        "low_access_ratio",
+        "fresh_access_ratio"  
     ]
 
     for col in numeric_cols:
@@ -123,6 +131,12 @@ def load_data(path: Path):
 
     if "need_score" in gdf.columns:
         gdf["need_score"] = gdf["need_score"].round(3)
+    
+    #if "access_problem_type" not in gdf.columns:
+       # gdf["access_problem_type"] = "Not classified"
+
+   # if "recommended_solution" not in gdf.columns:
+    #    gdf["recommended_solution"] = "No recommendation available."
 
     if "reason" not in gdf.columns:
         def explain(row: pd.Series) -> str:
@@ -155,6 +169,13 @@ def build_hover_fields(df: pd.DataFrame, color_col: str) -> dict:
         "food_business_count",
         "marta_access_count",
         "reason",
+        "access_problem_type",
+        "recommended_solution",
+        "total_snap_stores",
+        "low_access_ratio",
+        "fresh_access_ratio",
+        "low_access_count",
+        "high_access_count"
     ]
     hover = {}
     for col in base_fields:
@@ -185,6 +206,12 @@ map_options = [
         "marta_access_count",
         "food_business_count",
         "has_lila",
+        "access_problem_type",
+        "low_access_ratio",
+        "fresh_access_ratio",
+        "total_snap_stores",
+        "low_access_count",
+        "high_access_count"
     ] if col in tracts.columns
 ]
 
@@ -204,6 +231,13 @@ friendly_map_labels = {
     "marta_access_count": "Transit access points",
     "food_business_count": "Nearby food businesses",
     "has_lila": "LILA tract flag",
+    "access_problem_type": "Access problem type",
+    "low_access_ratio": "Convenience-store dependence",
+    "fresh_access_ratio": "Fresh food retailer share",
+    "total_snap_stores": "SNAP retailers",
+    "low_access_count": "Low-access SNAP retailers",
+    "high_access_count": "High-access SNAP retailers",
+    "TrcSNAP": "SNAP households / measure"
 }
 
 with st.sidebar:
@@ -215,13 +249,17 @@ with st.sidebar:
         format_func=lambda x: friendly_map_labels.get(x, x)
     )
     selected_priority = st.selectbox("Priority filter", priority_options, index=0)
+    problem_values = sorted(tracts["access_problem_type"].astype(str).dropna().unique().tolist())
+    problem_options = ["All"] + problem_values
+    selected_problem = st.selectbox("Access issue filter", problem_options, index=0)
     selected_tract = st.selectbox("Specific tract", tract_ids, index=0)
 
 filtered = tracts.copy()
 
 if selected_priority != "All" and "priority_level" in filtered.columns:
     filtered = filtered[filtered["priority_level"].astype(str) == selected_priority]
-
+if selected_problem != "All" and "access_problem_type" in filtered.columns:
+    filtered = filtered[filtered["access_problem_type"].astype(str) == selected_problem]
 if selected_tract != "All":
     filtered = filtered[filtered["tract_id"].astype(str) == selected_tract]
 
@@ -234,7 +272,12 @@ c1, c2, c3, c4 = st.columns(4)
 c1.metric("Census tracts shown", f"{total_tracts}")
 c2.metric("Very high priority", f"{very_high_count}")
 c3.metric("Average need score", f"{avg_score:.2f}" if pd.notna(avg_score) else "N/A")
-c4.metric("LILA tracts", f"{int(lila_count)}")
+low_quality_count = (
+    filtered["access_problem_type"].astype(str).eq("Low-Quality Access").sum()
+    if "access_problem_type" in filtered.columns else 0
+)
+
+c4.metric("Low-quality access tracts", f"{int(low_quality_count)}")
 
 map_col, detail_col = st.columns([2.35, 1], gap="large")
 
@@ -318,12 +361,22 @@ with detail_col:
         st.markdown(f"**Tract ID:** {tract_row['tract_id']}")
         if "priority_level" in tract_row.index:
             st.markdown(f"**Priority tier:** {tract_row['priority_level']}")
+        if "access_problem_type" in tract_row.index:
+            st.markdown(f"**Access issue type:** {tract_row['access_problem_type']}")
+        if "recommended_solution" in tract_row.index:
+            st.markdown(f"**Recommended intervention:** {tract_row['recommended_solution']}")
         if "need_score" in tract_row.index and pd.notna(tract_row["need_score"]):
             st.markdown(f"**Composite need score:** {tract_row['need_score']:.3f}")
         if "TrcSNAP" in tract_row.index and pd.notna(tract_row["TrcSNAP"]):
             st.markdown(f"**SNAP participation rate:** {tract_row['TrcSNAP']:.3f}")
         if "PvrtyRt" in tract_row.index and pd.notna(tract_row["PvrtyRt"]):
             st.markdown(f"**Poverty rate:** {tract_row['PvrtyRt']:.3f}")
+        if "total_snap_stores" in tract_row.index and pd.notna(tract_row["total_snap_stores"]):
+            st.markdown(f"**SNAP retailers:** {int(tract_row['total_snap_stores'])}")
+        if "low_access_ratio" in tract_row.index and pd.notna(tract_row["low_access_ratio"]):
+            st.markdown(f"**Convenience-store dependence:** {tract_row['low_access_ratio']:.1%}")
+        if "fresh_access_ratio" in tract_row.index and pd.notna(tract_row["fresh_access_ratio"]):
+            st.markdown(f"**Fresh food retailer share:** {tract_row['fresh_access_ratio']:.1%}")
         if "food_business_count" in tract_row.index and pd.notna(tract_row["food_business_count"]):
             st.markdown(f"**Nearby food businesses:** {int(tract_row['food_business_count'])}")
         if "marta_access_count" in tract_row.index and pd.notna(tract_row["marta_access_count"]):
@@ -346,6 +399,13 @@ table_cols = [
         "food_business_count",
         "marta_access_count",
         "reason",
+        "access_problem_type",
+        "recommended_solution",
+        "total_snap_stores",
+        "low_access_ratio",
+        "fresh_access_ratio",
+        "low_access_count",
+        "high_access_count",
     ] if col in filtered.columns
 ]
 
@@ -361,33 +421,14 @@ if not filtered.empty and "need_score" in filtered.columns:
         "food_business_count": "Food Businesses",
         "marta_access_count": "Transit Access",
         "reason": "Key Drivers",
+        "access_problem_type": "Access Issue",
+        "recommended_solution": "Recommended Intervention",
+        "total_snap_stores": "SNAP Retailers",
+        "low_access_ratio": "Convenience Dependence",
+        "fresh_access_ratio": "Fresh Retail Share",
+        "low_access_count": "Low Access Stores",
+        "high_access_count": "High Access Stores",
     })
     st.dataframe(renamed_table_df, use_container_width=True, hide_index=True)
 else:
     st.info("No table data to show for the current filters.")
-
-st.subheader("Interpretation")
-
-if not filtered.empty:
-    st.write(
-        "This dashboard highlights where fresh food access barriers appear most concentrated. "
-        "Use the map layer selector to compare whether tract-level need is more closely associated "
-        "with poverty, SNAP participation, low-access conditions, weaker transit connectivity, "
-        "or fewer nearby food businesses."
-    )
-
-    top = filtered.sort_values("need_score", ascending=False).head(5)
-    top_df = top[table_cols].rename(columns={
-        "tract_id": "Tract ID",
-        "need_score": "Need Score",
-        "priority_level": "Priority Tier",
-        "TrcSNAP": "SNAP Rate",
-        "PvrtyRt": "Poverty Rate",
-        "LAhalf10": "Low Access",
-        "food_business_count": "Food Businesses",
-        "marta_access_count": "Transit Access",
-        "reason": "Key Drivers",
-    })
-    st.dataframe(top_df, use_container_width=True, hide_index=True)
-else:
-    st.info("No tracts match the current view.")
