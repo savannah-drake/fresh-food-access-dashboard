@@ -1,10 +1,81 @@
 import json
 from pathlib import Path
-
-import geopandas as gpd
 import pandas as pd
-import plotly.express as px
 import streamlit as st
+import plotly.express as px
+
+
+@st.cache_data
+def load_data(path: Path):
+    with open(path, "r") as f:
+        geojson = json.load(f)
+
+    records = []
+    for feature in geojson["features"]:
+        props = feature["properties"].copy()
+        records.append(props)
+
+    df = pd.DataFrame(records)
+
+    numeric_cols = [
+        "need_score",
+        "TrcSNAP",
+        "PvrtyRt",
+        "LAhalf10",
+        "food_business_count",
+        "marta_access_count",
+        "has_lila",
+        "total_snap_stores",
+        "high_access_count",
+        "moderate_access_count",
+        "specialty_access_count",
+        "low_access_count",
+        "other_snap_count",
+        "low_access_ratio",
+        "fresh_access_ratio",
+    ]
+
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    if "priority_level" not in df.columns and "priority_label" in df.columns:
+        df["priority_level"] = df["priority_label"]
+
+    if "priority_level" not in df.columns:
+        df["priority_level"] = pd.qcut(
+            df["need_score"].rank(method="first"),
+            q=4,
+            labels=["Low", "Moderate", "High", "Very High"],
+        )
+
+    if "need_score" in df.columns:
+        df["need_score"] = df["need_score"].round(3)
+
+    if "reason" not in df.columns:
+        def explain(row: pd.Series) -> str:
+            reasons = []
+            if row.get("TrcSNAP", 0) > 0.30:
+                reasons.append("higher SNAP reliance")
+            if row.get("PvrtyRt", 0) > 0.25:
+                reasons.append("higher poverty burden")
+            if row.get("food_business_count", 999) < 2:
+                reasons.append("limited nearby food retail")
+            if row.get("marta_access_count", 999) < 2:
+                reasons.append("weaker transit connectivity")
+            if not reasons:
+                reasons.append("mixed access conditions")
+            return ", ".join(reasons)
+
+        df["reason"] = df.apply(explain, axis=1)
+        if "tract_id" in df.columns:
+            df["tract_id"] = df["tract_id"].astype(str)
+
+    for feature in geojson["features"]:
+        if "tract_id" in feature["properties"]:
+            feature["properties"]["tract_id"] = str(feature["properties"]["tract_id"])
+    return df, geojson
+
 
 st.set_page_config(
     page_title="Fresh Food Access Dashboard",
@@ -93,70 +164,6 @@ st.caption("Neighborhood-level decision support for identifying communities faci
 DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "processed" / "tract_level_food_access.geojson"
 st.write("Reading data from:", DATA_PATH)
 
-#@st.cache_data
-def load_data(path: Path):
-    gdf = gpd.read_file(path)
-
-    numeric_cols = [
-        "need_score",
-        "TrcSNAP",
-        "PvrtyRt",
-        "LAhalf10",
-        "food_business_count",
-        "marta_access_count",
-        "has_lila",
-        "total_snap_stores",
-        "high_access_count",
-        "moderate_access_count",
-        "specialty_access_count",
-        "low_access_count",
-        "other_snap_count",
-        "low_access_ratio",
-        "fresh_access_ratio"  
-    ]
-
-    for col in numeric_cols:
-        if col in gdf.columns:
-            gdf[col] = pd.to_numeric(gdf[col], errors="coerce")
-
-    if "priority_level" not in gdf.columns and "priority_label" in gdf.columns:
-        gdf["priority_level"] = gdf["priority_label"]
-
-    if "priority_level" not in gdf.columns:
-        gdf["priority_level"] = pd.qcut(
-            gdf["need_score"].rank(method="first"),
-            q=4,
-            labels=["Low", "Moderate", "High", "Very High"],
-        )
-
-    if "need_score" in gdf.columns:
-        gdf["need_score"] = gdf["need_score"].round(3)
-    
-    #if "access_problem_type" not in gdf.columns:
-       # gdf["access_problem_type"] = "Not classified"
-
-   # if "recommended_solution" not in gdf.columns:
-    #    gdf["recommended_solution"] = "No recommendation available."
-
-    if "reason" not in gdf.columns:
-        def explain(row: pd.Series) -> str:
-            reasons = []
-            if row.get("TrcSNAP", 0) > 0.30:
-                reasons.append("higher SNAP reliance")
-            if row.get("PvrtyRt", 0) > 0.25:
-                reasons.append("higher poverty burden")
-            if row.get("food_business_count", 999) < 2:
-                reasons.append("limited nearby food retail")
-            if row.get("marta_access_count", 999) < 2:
-                reasons.append("weaker transit connectivity")
-            if not reasons:
-                reasons.append("mixed access conditions")
-            return ", ".join(reasons)
-
-        gdf["reason"] = gdf.apply(explain, axis=1)
-
-    return gdf
-
 
 def build_hover_fields(df: pd.DataFrame, color_col: str) -> dict:
     base_fields = [
@@ -190,7 +197,7 @@ if not DATA_PATH.exists():
     st.error(f"Processed file not found: {DATA_PATH}")
     st.stop()
 
-tracts = load_data(DATA_PATH)
+tracts, geojson = load_data(DATA_PATH)
 
 if "tract_id" not in tracts.columns:
     st.error("The dataset is missing a tract_id column.")
@@ -225,7 +232,7 @@ tract_ids = ["All"] + sorted(tracts["tract_id"].astype(str).dropna().unique().to
 friendly_map_labels = {
     "need_score": "Composite need score",
     "priority_level": "Priority tier",
-    "TrcSNAP": "SNAP participation rate",
+    "TrcSNAP": "SNAP households / measure",
     "PvrtyRt": "Poverty rate",
     "LAhalf10": "Low-access share",
     "marta_access_count": "Transit access points",
@@ -237,7 +244,6 @@ friendly_map_labels = {
     "total_snap_stores": "SNAP retailers",
     "low_access_count": "Low-access SNAP retailers",
     "high_access_count": "High-access SNAP retailers",
-    "TrcSNAP": "SNAP households / measure"
 }
 
 with st.sidebar:
@@ -298,12 +304,13 @@ with map_col:
                 "Very High": "#ef4444",
             }
 
-            fig = px.choropleth_map(
+            fig = px.choropleth_mapbox(
                 plot_df,
-                geojson=json.loads(plot_df.to_json()),
+                geojson=geojson,
                 locations="tract_id",
                 featureidkey="properties.tract_id",
                 color="priority_level",
+                mapbox_style="carto-positron",
                 category_orders=category_order,
                 color_discrete_map=color_discrete_map,
                 hover_data=build_hover_fields(plot_df, selected_map_var),
@@ -312,12 +319,13 @@ with map_col:
                 opacity=0.84,
             )
         else:
-            fig = px.choropleth_map(
+            fig = px.choropleth_mapbox(
                 plot_df,
-                geojson=json.loads(plot_df.to_json()),
+                geojson=geojson,
                 locations="tract_id",
                 featureidkey="properties.tract_id",
                 color=selected_map_var,
+                mapbox_style="carto-positron",
                 color_continuous_scale=[
                     "#052e16",
                     "#166534",
@@ -331,7 +339,6 @@ with map_col:
                 opacity=0.84,
             )
 
-        fig.update_geos(fitbounds="locations", visible=False)
         fig.update_layout(
             margin={"r": 0, "t": 0, "l": 0, "b": 0},
             height=650,
