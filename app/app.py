@@ -4,6 +4,9 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 
+BASE_DIR = Path(__file__).resolve().parents[1]
+LOGO_PATH = BASE_DIR / "assets" / "logo.png"
+
 
 @st.cache_data
 def load_data(path: Path):
@@ -21,7 +24,6 @@ def load_data(path: Path):
         "need_score",
         "TrcSNAP",
         "PvrtyRt",
-        "LAhalf10",
         "food_business_count",
         "marta_access_count",
         "has_lila",
@@ -79,6 +81,7 @@ def load_data(path: Path):
 
 st.set_page_config(
     page_title="Fresh Food Access Dashboard",
+    page_icon=str(LOGO_PATH),
     layout="wide",
 )
 
@@ -110,6 +113,15 @@ p, div, label, span {
 [data-testid="stSidebar"] h3,
 [data-testid="stSidebar"] label {
     color: #ecfdf5;
+}
+
+[data-testid="stSidebar"][aria-expanded="false"] * {
+    display: none !important;
+}
+
+
+[data-testid="collapsedControl"] {
+    display: block !important;
 }
 
 [data-testid="metric-container"] {
@@ -158,11 +170,17 @@ hr {
 </style>
 """, unsafe_allow_html=True)
 
-st.title("Fresh Food Access Dashboard")
-st.caption("Neighborhood-level decision support for identifying communities facing elevated barriers to fresh food access in Atlanta.")
+col1, col2 = st.columns([1, 6])
+
+with col1:
+    st.image(str(LOGO_PATH), width=200)
+
+with col2:
+    st.title("Fresh Food Access Dashboard")
+    st.caption("Neighborhood-level decision support for identifying communities facing elevated barriers to fresh food access in Atlanta.")
 
 DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "processed" / "tract_level_food_access.geojson"
-st.write("Reading data from:", DATA_PATH)
+
 
 
 def build_hover_fields(df: pd.DataFrame, color_col: str) -> dict:
@@ -170,9 +188,8 @@ def build_hover_fields(df: pd.DataFrame, color_col: str) -> dict:
         "tract_id",
         "need_score",
         "priority_level",
-        "TrcSNAP",
+        "snap_reliance_level",
         "PvrtyRt",
-        "LAhalf10",
         "food_business_count",
         "marta_access_count",
         "reason",
@@ -207,9 +224,9 @@ map_options = [
     col for col in [
         "need_score",
         "priority_level",
-        "TrcSNAP",
+        "snap_reliance_level",
         "PvrtyRt",
-        "LAhalf10",
+        "low_access_flag",
         "marta_access_count",
         "food_business_count",
         "has_lila",
@@ -232,9 +249,8 @@ tract_ids = ["All"] + sorted(tracts["tract_id"].astype(str).dropna().unique().to
 friendly_map_labels = {
     "need_score": "Composite need score",
     "priority_level": "Priority tier",
-    "TrcSNAP": "SNAP households / measure",
+    "snap_reliance_level": "SNAP households / measure",
     "PvrtyRt": "Poverty rate",
-    "LAhalf10": "Low-access share",
     "marta_access_count": "Transit access points",
     "food_business_count": "Nearby food businesses",
     "has_lila": "LILA tract flag",
@@ -400,9 +416,8 @@ table_cols = [
         "tract_id",
         "need_score",
         "priority_level",
-        "TrcSNAP",
+        "snap_reliance_level",
         "PvrtyRt",
-        "LAhalf10",
         "food_business_count",
         "marta_access_count",
         "reason",
@@ -422,9 +437,8 @@ if not filtered.empty and "need_score" in filtered.columns:
         "tract_id": "Tract ID",
         "need_score": "Need Score",
         "priority_level": "Priority Tier",
-        "TrcSNAP": "SNAP Rate",
+        "snap_reliance_level": "SNAP Rate",
         "PvrtyRt": "Poverty Rate",
-        "LAhalf10": "Low Access",
         "food_business_count": "Food Businesses",
         "marta_access_count": "Transit Access",
         "reason": "Key Drivers",
